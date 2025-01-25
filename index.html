@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Score App</title>
+    <style>
+        /* Modern and professional CSS */
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #login-signup, #projects, #editor {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+
+        button {
+            background-color: #6200ea;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #3700b3;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #staff-canvas {
+            border: 1px solid #ddd;
+            margin-top: 1rem;
+            background-color: #fff;
+        }
+
+        #controls {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        #project-list {
+            margin-top: 1rem;
+        }
+
+        .project-item {
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+        }
+
+        .project-item:hover {
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Login/Signup Section -->
+    <div id="login-signup">
+        <h1>Music Score App</h1>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button id="login-btn">Login</button>
+        <button id="signup-btn">Sign Up</button>
+    </div>
+
+    <!-- Projects Section -->
+    <div id="projects" class="hidden">
+        <h1>Your Projects</h1>
+        <input type="text" id="project-name" placeholder="New Project Name">
+        <button id="new-project-btn">Create Project</button>
+        <div id="project-list"></div>
+    </div>
+
+    <!-- Editor Section -->
+    <div id="editor" class="hidden">
+        <h1>Project Editor</h1>
+        <canvas id="staff-canvas" width="800" height="200"></canvas>
+        <div id="controls">
+            <select id="note-duration">
+                <option value="whole">Whole Note</option>
+                <option value="half">Half Note</option>
+                <option value="quarter">Quarter Note</option>
+                <option value="eighth">Eighth Note</option>
+            </select>
+            <button id="play-btn">Play</button>
+            <button id="pause-btn">Pause</button>
+            <button id="stop-btn">Stop</button>
+            <button id="rewind-btn">Rewind</button>
+            <button id="save-btn">Save</button>
+            <button id="back-btn">Back to Projects</button>
+        </div>
+    </div>
+
+    <script>
+        const backendUrl = 'backend.php';
+        let currentProjectId = null;
+        const notes = [];
+        let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let isPlaying = false;
+        let startTime = 0;
+        let pausedTime = 0;
+
+        // Login
+        document.getElementById('login-btn').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=login&username=${username}&password=${password}`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                document.getElementById('login-signup').classList.add('hidden');
+                document.getElementById('projects').classList.remove('hidden');
+                loadProjects();
+            } else {
+                alert(result.message);
+            }
+        });
+
+        // Signup
+        document.getElementById('signup-btn').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=signup&username=${username}&password=${password}`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                alert('Signup successful! Please login.');
+            } else {
+                alert(result.message);
+            }
+        });
+
+        // Create Project
+        document.getElementById('new-project-btn').addEventListener('click', async () => {
+            const projectName = document.getElementById('project-name').value;
+
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=create_project&project_name=${projectName}`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                currentProjectId = result.project_id;
+                document.getElementById('projects').classList.add('hidden');
+                document.getElementById('editor').classList.remove('hidden');
+                drawStaff();
+            } else {
+                alert(result.message);
+            }
+        });
+
+        // Load Projects
+        async function loadProjects() {
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=get_projects`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const projectList = document.getElementById('project-list');
+                projectList.innerHTML = result.projects.map(project => `
+                    <div class="project-item" data-id="${project.id}">
+                        ${project.project_name} (${new Date(project.created_at).toLocaleDateString()})
+                    </div>
+                `).join('');
+
+                document.querySelectorAll('.project-item').forEach(item => {
+                    item.addEventListener('click', () => openProject(item.dataset.id));
+                });
+            } else {
+                alert(result.message);
+            }
+        }
+
+        // Open Project
+        async function openProject(projectId) {
+            currentProjectId = projectId;
+            document.getElementById('projects').classList.add('hidden');
+            document.getElementById('editor').classList.remove('hidden');
+            drawStaff();
+            loadNotes();
+        }
+
+        // Draw Staff
+        const canvas = document.getElementById('staff-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function drawStaff() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < 5; i++) {
+                const y = 50 + i * 20;
+                ctx.beginPath();
+                ctx.moveTo(50, y);
+                ctx.lineTo(canvas.width - 50, y);
+                ctx.stroke();
+            }
+        }
+
+        // Place Notes
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Snap to nearest line or space
+            const snappedY = Math.round((y - 50) / 10) * 10 + 50;
+            if (snappedY < 50 || snappedY > 130) return; // Restrict to staff
+
+            const duration = document.getElementById('note-duration').value;
+            notes.push({ note_name: 'C4', duration, position_x: x, position_y: snappedY });
+            drawStaff();
+            drawNotes();
+        });
+
+        // Draw Notes
+        function drawNotes() {
+            notes.forEach(note => {
+                ctx.beginPath();
+                ctx.arc(note.position_x, note.position_y, 10, 0, 2 * Math.PI);
+                if (note.duration === 'quarter' || note.duration === 'eighth') {
+                    ctx.fill(); // Filled circle for quarter/eighth notes
+                } else {
+                    ctx.stroke(); // Hollow circle for whole/half notes
+                }
+
+                if (note.duration === 'eighth') {
+                    // Add flag for eighth notes
+                    ctx.beginPath();
+                    ctx.moveTo(note.position_x + 10, note.position_y);
+                    ctx.lineTo(note.position_x + 20, note.position_y - 20);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // Save Notes
+        document.getElementById('save-btn').addEventListener('click', async () => {
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=save_notes&project_id=${currentProjectId}&notes=${JSON.stringify(notes)}`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                alert('Notes saved!');
+            } else {
+                alert(result.message);
+            }
+        });
+
+        // Back to Projects
+        document.getElementById('back-btn').addEventListener('click', () => {
+            document.getElementById('editor').classList.add('hidden');
+            document.getElementById('projects').classList.remove('hidden');
+            notes.length = 0; // Clear notes
+        });
+
+        // Load Notes
+        async function loadNotes() {
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `action=get_notes&project_id=${currentProjectId}`
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                notes.push(...result.notes);
+                drawNotes();
+            } else {
+                alert(result.message);
+            }
+        }
+
+        // Playback Controls
+        document.getElementById('play-btn').addEventListener('click', play);
+        document.getElementById('pause-btn').addEventListener('click', pause);
+        document.getElementById('stop-btn').addEventListener('click', stop);
+        document.getElementById('rewind-btn').addEventListener('click', rewind);
+
+        function play() {
+            if (!isPlaying) {
+                isPlaying = true;
+                startTime = audioContext.currentTime - pausedTime;
+                scheduleNotes();
+            }
+        }
+
+        function pause() {
+            if (isPlaying) {
+                isPlaying = false;
+                pausedTime = audioContext.currentTime - startTime;
+            }
+        }
+
+        function stop() {
+            isPlaying = false;
+            pausedTime = 0;
+        }
+
+        function rewind() {
+            stop();
+            play();
+        }
+
+        function scheduleNotes() {
+            if (!isPlaying) return;
+
+            notes.forEach((note, index) => {
+                const time = startTime + index * 0.5; // Adjust timing as needed
+                const oscillator = audioContext.createOscillator();
+                oscillator.frequency.setValueAtTime(440, time); // A4 note
+                oscillator.connect(audioContext.destination);
+                oscillator.start(time);
+                oscillator.stop(time + 0.5); // Adjust duration as needed
+            });
+        }
+    </script>
+</body>
+</html>
